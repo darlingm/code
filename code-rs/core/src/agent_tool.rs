@@ -758,7 +758,15 @@ fn command_exists(cmd: &str) -> bool {
     };
 
     let command_missing = !command_exists(&command_for_spawn);
-    let use_current_exe = should_use_current_exe_for_agent(family, command_missing, config.as_ref());
+    let command_is_default_cli = spec_opt
+        .map(|spec| command_for_spawn.eq_ignore_ascii_case(spec.cli))
+        .unwrap_or(false);
+    let use_current_exe = should_use_current_exe_for_agent(
+        family,
+        command_missing,
+        config.as_ref(),
+        command_is_default_cli,
+    );
 
     let mut cmd = if use_current_exe {
         match current_code_binary_path() {
@@ -801,15 +809,9 @@ fn command_exists(cmd: &str) -> bool {
 
     strip_model_flags(&mut final_args);
 
-    let spec_model_args: Vec<String> = if let Some(spec) = spec_opt {
-        if matches!(spec.family, "code" | "codex" | "cloud") && use_current_exe {
-            Vec::new()
-        } else {
-            spec.model_args.iter().map(|arg| (*arg).to_string()).collect()
-        }
-    } else {
-        Vec::new()
-    };
+    let spec_model_args: Vec<String> = spec_opt
+        .map(|spec| spec.model_args.iter().map(|arg| (*arg).to_string()).collect())
+        .unwrap_or_default();
 
     let built_in_cloud = family == "cloud" && config.is_none();
 
@@ -1059,6 +1061,7 @@ pub(crate) fn should_use_current_exe_for_agent(
     family: &str,
     command_missing: bool,
     config: Option<&AgentConfig>,
+    command_is_default_cli: bool,
 ) -> bool {
     if !matches!(family, "code" | "codex" | "cloud") {
         return false;
@@ -1068,11 +1071,19 @@ pub(crate) fn should_use_current_exe_for_agent(
         return true;
     }
 
-    if let Some(cfg) = config {
-        cfg.command.trim().is_empty()
-    } else {
-        false
+    let config_command_empty = config.map(|cfg| cfg.command.trim().is_empty()).unwrap_or(false);
+    let config_command_overridden = config.map(|cfg| {
+        let trimmed = cfg.command.trim();
+        !trimmed.is_empty() && !command_is_default_cli
+    }).unwrap_or(false);
+
+    // Prefer the current binary when using the default Code/Codex CLI ("coder")
+    // so agents run the same build as the TUI, even if another coder is on PATH.
+    if command_is_default_cli && !config_command_overridden {
+        return true;
     }
+
+    config_command_empty
 }
 
 fn strip_model_flags(args: &mut Vec<String>) {
@@ -1824,8 +1835,23 @@ mod tests {
     #[test]
     fn code_family_falls_back_when_command_missing() {
         let cfg = agent_with_command("definitely-not-present-429");
-        let use_current = should_use_current_exe_for_agent("code", true, Some(&cfg));
+        let use_current = should_use_current_exe_for_agent("code", true, Some(&cfg), true);
         assert!(use_current);
+    }
+
+    #[test]
+    fn code_family_prefers_current_exe_for_default_cli_even_if_present() {
+        let cfg = agent_with_command("coder");
+        // command_missing=false but command_is_default_cli=true should still prefer current exe
+        let use_current = should_use_current_exe_for_agent("code", false, Some(&cfg), true);
+        assert!(use_current);
+    }
+
+    #[test]
+    fn custom_command_keeps_external_invocation() {
+        let cfg = agent_with_command("/opt/custom-coder");
+        let use_current = should_use_current_exe_for_agent("code", false, Some(&cfg), false);
+        assert!(!use_current);
     }
 }
 

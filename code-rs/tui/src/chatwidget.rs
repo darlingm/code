@@ -14776,6 +14776,15 @@ fi\n\
         selected_index: usize,
     ) -> Option<TerminalLaunch> {
         self.agents_overview_selected_index = selected_index;
+        if let Some(spec) = agent_model_spec(&name) {
+            if matches!(spec.family, "code" | "codex" | "cloud") {
+                self.push_background_tail(format!(
+                    "'{name}' is built into Code; it uses the current Code binary unless you override its command."
+                ));
+                self.show_agents_overview_ui();
+                return None;
+            }
+        }
         let Some((_, default_command)) = self.resolve_agent_install_command(&name) else {
             self.history_push_plain_state(history_cell::new_error_event(format!(
                 "No install command available for agent '{name}' on this platform."
@@ -19993,9 +20002,9 @@ Have we met every part of this goal and is there no further work to do?"#
                 .find(|a| a.name.eq_ignore_ascii_case(name))
             {
                 let builtin = is_builtin_agent(&cfg.name, &cfg.command);
-                    let spec_cli = agent_model_spec(&cfg.name)
-                        .or_else(|| agent_model_spec(&cfg.command))
-                        .map(|spec| spec.cli);
+                let spec_cli = agent_model_spec(&cfg.name)
+                    .or_else(|| agent_model_spec(&cfg.command))
+                    .map(|spec| spec.cli);
                 let command_to_check = command_for_check(&cfg.command);
                 let installed = if builtin {
                     true
@@ -20006,16 +20015,18 @@ Have we met every part of this goal and is there no further work to do?"#
                 } else {
                     false
                 };
-                agent_rows.push(AgentOverviewRow {
-                    name: cfg.name.clone(),
-                    enabled: cfg.enabled,
-                    installed,
-                    description: Self::agent_description_for(
-                        &cfg.name,
-                        Some(&cfg.command),
-                        cfg.description.as_deref(),
-                    ),
-                });
+                let mut description = Self::agent_description_for(
+                    &cfg.name,
+                    Some(&cfg.command),
+                    cfg.description.as_deref(),
+                );
+                if builtin {
+                    description = Some(match description {
+                        Some(text) if !text.is_empty() => format!("{text} (built-in)", text = text),
+                        _ => "Built-in OpenAI Code agent (uses current Code binary)".to_string(),
+                    });
+                }
+                agent_rows.push(AgentOverviewRow { name: cfg.name.clone(), enabled: cfg.enabled, installed, builtin, description });
             } else if let Some(cfg) = pending_agents.get(&name_lower) {
                 let builtin = is_builtin_agent(&cfg.name, &cfg.command);
                 let spec_cli = agent_model_spec(&cfg.name)
@@ -20031,16 +20042,18 @@ Have we met every part of this goal and is there no further work to do?"#
                 } else {
                     false
                 };
-                agent_rows.push(AgentOverviewRow {
-                    name: cfg.name.clone(),
-                    enabled: cfg.enabled,
-                    installed,
-                    description: Self::agent_description_for(
-                        &cfg.name,
-                        Some(&cfg.command),
-                        cfg.description.as_deref(),
-                    ),
-                });
+                let mut description = Self::agent_description_for(
+                    &cfg.name,
+                    Some(&cfg.command),
+                    cfg.description.as_deref(),
+                );
+                if builtin {
+                    description = Some(match description {
+                        Some(text) if !text.is_empty() => format!("{text} (built-in)", text = text),
+                        _ => "Built-in OpenAI Code agent (uses current Code binary)".to_string(),
+                    });
+                }
+                agent_rows.push(AgentOverviewRow { name: cfg.name.clone(), enabled: cfg.enabled, installed, builtin, description });
             } else {
                 let cmd = name.clone();
                 let builtin = is_builtin_agent(name, &cmd);
@@ -20052,12 +20065,14 @@ Have we met every part of this goal and is there no further work to do?"#
                 } else {
                     command_exists(&cmd)
                 };
-                agent_rows.push(AgentOverviewRow {
-                    name: name.clone(),
-                    enabled: true,
-                    installed,
-                    description: Self::agent_description_for(name, Some(&cmd), None),
-                });
+                let mut description = Self::agent_description_for(name, Some(&cmd), None);
+                if builtin {
+                    description = Some(match description {
+                        Some(text) if !text.is_empty() => format!("{text} (built-in)", text = text),
+                        _ => "Built-in OpenAI Code agent (uses current Code binary)".to_string(),
+                    });
+                }
+                agent_rows.push(AgentOverviewRow { name: name.clone(), enabled: true, installed, builtin, description });
             }
         }
 

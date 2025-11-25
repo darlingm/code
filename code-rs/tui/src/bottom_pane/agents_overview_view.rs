@@ -13,7 +13,7 @@ use super::BottomPane;
 
 #[derive(Clone, Debug)]
 pub(crate) struct AgentsOverviewView {
-    agents: Vec<(String, bool /*enabled*/ , bool /*installed*/ , String /*command*/ )>,
+    agents: Vec<(String, bool /*enabled*/ , bool /*installed*/ , bool /*builtin*/ , String /*command*/ )>,
     commands: Vec<String>,
     selected: usize,
     is_complete: bool,
@@ -22,7 +22,7 @@ pub(crate) struct AgentsOverviewView {
 
 impl AgentsOverviewView {
     pub fn new(
-        agents: Vec<(String, bool, bool, String)>,
+        agents: Vec<(String, bool, bool, bool, String)>,
         commands: Vec<String>,
         selected_index: usize,
         app_event_tx: AppEventSender,
@@ -50,14 +50,16 @@ impl AgentsOverviewView {
             .map(|(name, _, _, _)| name.len())
             .max()
             .unwrap_or(0);
-        for (i, (name, enabled, installed, _cmd)) in self.agents.iter().enumerate() {
+        for (i, (name, enabled, installed, builtin, _cmd)) in self.agents.iter().enumerate() {
             let sel = i == self.selected;
             let (status_text, status_color) = if !*enabled {
                 ("disabled", crate::colors::error())
+            } else if *builtin {
+                ("built-in", crate::colors::success())
             } else if !*installed {
-                ("not installed", crate::colors::warning())
+                ("not on PATH", crate::colors::warning())
             } else {
-                ("enabled", crate::colors::success())
+                ("on PATH", crate::colors::success())
             };
             let dot_style = Style::default().fg(status_color);
             let name_style = if sel { Style::default().fg(crate::colors::primary()).add_modifier(Modifier::BOLD) } else { Style::default() };
@@ -74,7 +76,9 @@ impl AgentsOverviewView {
             ];
             if sel {
                 spans.push(Span::raw("  "));
-                let hint = if !*installed {
+                let hint = if *builtin {
+                    "(press Enter to configure built-in)"
+                } else if !*installed {
                     "(press Enter to install)"
                 } else {
                     "(press Enter to configure)"

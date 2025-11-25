@@ -434,6 +434,7 @@ pub(crate) struct AgentOverviewRow {
     pub(crate) name: String,
     pub(crate) enabled: bool,
     pub(crate) installed: bool,
+    pub(crate) builtin: bool,
     pub(crate) description: Option<String>,
 }
 
@@ -546,10 +547,12 @@ impl AgentsSettingsContent {
             let selected = idx == state.selected;
             let status = if !row.enabled {
                 ("disabled", crate::colors::error())
+            } else if row.builtin {
+                ("built-in", crate::colors::success())
             } else if !row.installed {
-                ("not installed", crate::colors::warning())
+                ("not on PATH", crate::colors::warning())
             } else {
-                ("enabled", crate::colors::success())
+                ("on PATH", crate::colors::success())
             };
 
             let mut spans = Vec::new();
@@ -605,7 +608,9 @@ impl AgentsSettingsContent {
 
             if selected && !showed_desc {
                 spans.push(Span::raw("  "));
-                let hint = if !row.installed {
+                let hint = if row.builtin {
+                    "Enter to configure (built-in)"
+                } else if !row.installed {
                     "Enter to install"
                 } else {
                     "Enter to configure"

@@ -71,7 +71,7 @@ use crate::protocol::WebSearchCompleteEvent;
 use code_protocol::mcp_protocol::AuthMode;
 use crate::account_usage;
 use crate::auth_accounts;
-use crate::agent_defaults::{default_agent_configs, enabled_agent_model_specs};
+use crate::agent_defaults::{agent_model_spec, default_agent_configs, enabled_agent_model_specs};
 use code_protocol::models::WebSearchAction;
 use code_protocol::protocol::RolloutItem;
 use shlex::split as shlex_split;
@@ -8479,14 +8479,35 @@ pub(crate) async fn handle_run_agent(
 
             // Helper: derive the command to check for a given model/config pair.
             fn resolve_command_for_check(model: &str, cfg: Option<&crate::config_types::AgentConfig>) -> (String, bool) {
+                // When a config entry exists, prefer spec-based classification so we don't
+                // skip built-in Code/Codex/Cloud agents just because `coder` is missing on PATH.
                 if let Some(c) = cfg {
+                    let spec = agent_model_spec(&c.name).or_else(|| agent_model_spec(&c.command));
                     let (base, _) = split_command_and_args(&c.command);
-                    let trimmed = base.trim();
+                    let command_trimmed = if base.trim().is_empty() { c.command.trim() } else { base.trim() };
+
+                    if let Some(spec) = spec {
+                        let is_builtin_family = matches!(spec.family, "code" | "codex" | "cloud");
+                        let uses_default_cli = command_trimmed.is_empty()
+                            || command_trimmed.eq_ignore_ascii_case(spec.cli);
+                        if is_builtin_family && uses_default_cli {
+                            return (spec.cli.to_string(), true);
+                        }
+                    }
+
+                    let trimmed = command_trimmed;
                     if !trimmed.is_empty() {
                         return (trimmed.to_string(), false);
                     }
                     return (c.command.clone(), false);
                 }
+
+                // No config: classify by model spec or legacy aliases.
+                if let Some(spec) = agent_model_spec(model) {
+                    let is_builtin_family = matches!(spec.family, "code" | "codex" | "cloud");
+                    return (spec.cli.to_string(), is_builtin_family);
+                }
+
                 let m = model.to_lowercase();
                 match m.as_str() {
                     // Built-in: always available via current_exe fallback.
